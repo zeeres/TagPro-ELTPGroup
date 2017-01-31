@@ -1,7 +1,7 @@
 
 // ==UserScript==
 // @name         TagPro ELTP group settings dev
-// @version      0.1
+// @version      0.2
 // @description  Sets default ELTP group settings, maps and also remaining time in case of break request
 // @author       zeeres
 // @include      http://tagpro-*.koalabeast.com*
@@ -21,12 +21,17 @@ function set_week() {
 }
 set_week();
 
+var debug = true;
 
-var default_data = {stored: true, active: true, map: '', time: 10, caps: 0, half: 1, lastbrcall: 0, lastbrcall_team: 0, brcall_team1: 0, brcall_team2: 0, me: '', leader: false};  // default data
+function logd(message) {
+    if (debug) console.log(message);
+}
+
+var default_data = {stored: true, active: true, map: '', time: 10, game_caps: [], capDiff: 0, half: 1, lastbrcall: 0, lastbrcall_team: 0, brcall_team1: false, brcall_team2: false, me: '', leader: false};  // default data
 
 class Settings {
     constructor(data) {
-        this.prefix = 'TPELTP_';
+        this.prefix = 'TPEGS_';
         if (GM_getValue(this.prefix+'stored') === undefined) {   // never stored values yet
             this.data = data;
             this.store_all();
@@ -40,13 +45,18 @@ class Settings {
     set(variable, value) {
         this.data[variable] = value;
         GM_setValue(this.prefix+variable, value);
+        logd('have set ' + variable + ' to ' + value);
+        logd('check ' + this.prefix + variable + ' was set to ' + GM_getValue(this.prefix+variable));
     }
     delete(variable) {
         delete this.data[variable];
         GM_deleteValue(this.prefix+variable);
     }
-    get(variable) {
-        var value = GM_getValue(this.prefix+variable);
+    get(variable, share_prefix) {
+        share_prefix = share_prefix || false;
+        var value = (share_prefix)?(JSON.parse(window.localStorage.getItem(share_prefix+variable))):GM_getValue(this.prefix+variable);
+        logd((share_prefix)?(variable + ' (from localStorage) is:'):(variable + ' is:'));
+        logd(value);
         var keys = Object.keys(default_data);
         var found = false;
         for(var i = 0; i < keys.length; i++) {
@@ -56,6 +66,9 @@ class Settings {
             this.set(variable, default_data[variable]);
             return default_data[variable];
         } else return value;
+    }
+    share(variable) {
+        window.localStorage.setItem(this.prefix+variable, JSON.stringify(this.data[variable]));
     }
     store_all() {
         for (var d in this.data) {
@@ -105,7 +118,7 @@ var settings = new Settings(default_data);
 // settings = new Settings(default_data);
 
 function setup() {
-    console.log('setup');
+    logd('setup');
     // Sets up the button and calls activate and deactivate functions if checkbox is changed
 
     var $pull_right = $('.group-settings');  // Element where the "ELTP Group" is placed
@@ -132,7 +145,7 @@ function setup() {
     });
 
     // week buttons
-    console.log(week);
+    logd(week);
     $('#tpeltp_div').append('Week <label class="btn btn-default"><input type="radio" name="tpeltp_week" value="0">0</label>');
     for (var i = 1; i < maps.length-1; i++) {  // -1 bc we are starting from 1 and another -1 bc last map doesn't count as a new week
         $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_week" value="'+i+'">'+i+'</label>');
@@ -156,14 +169,28 @@ function setup() {
         set_map();
     });
 
-    if (settings.get('active')) {  // if script was activated and page was either refreshed or
-        console.log('is_activated');
-        activate();
+    $('#tpeltp_div').append('<br><div id="tpeltp_red" align="center" class="col-md-6 private-game"></div><div id="tpeltp_blue" align="center" class="col-md-6 private-game"></div>');
+    // team br call buttons
+    $('#tpeltp_red').append('<label class="btn btn-default"><input type="checkbox" class="js-socket-public" name="tpeltp_redbr"> used br</label>');
+    $('input[name="tpeltp_redbr"]').prop('checked', settings.get('brcall_team1'));
+    $('input[name="tpeltp_redbr"]').change(function() {  // when one of the "half" buttons is pushed
+        settings.set('brcall_team1', $(this).prop('checked'));
+    });
+    $('#tpeltp_blue').append('<label class="btn btn-default"><input type="checkbox" class="js-socket-public" name="tpeltp_bluebr"> used br</label>');
+    $('input[name="tpeltp_bluebr"]').prop('checked', settings.get('brcall_team2'));
+    $('input[name="tpeltp_bluebr"]').change(function() {  // when one of the "half" buttons is pushed
+        settings.set('brcall_team2', $(this).prop('checked'));
+    });
+
+    if (settings.get('active')) {  // if script was activated and page was either refreshed or we returned from game
+        logd('setup is_activated');
+        // activate();
         $('input[name="ELTPGame"]').prop('checked', true);
         var brcalltime = settings.get('lastbrcall');
-
+        logd('setup brcalltime:' + brcalltime);
         if (brcalltime > 0) {  // if break was called
-            console.log('brcalled');
+            $('#end-game-btn').click();
+            logd('brcalled');
             var teams = ['redTeamName', 'blueTeamName'];
             var brteam = 0;
             if (settings.get('brcall_team1') > 0) {
@@ -171,22 +198,22 @@ function setup() {
             } else if (settings.get('brcall_team2') > 0) {
                 brteam = 2;
             } else {
-                console.log('ELTP_GS: wtf happened here :<');
+                logd('wtf happened here :<');
             }
 
             var team_called = settings.get('lastbrcall_team');
-            console.log('team_called: ' + team_called);
+            if (team_called === 1) {
+                $('#tpeltp_redbr').prop('checked', true);
+            } else if (team_called === 2) {
+                $('#tpeltp_bluebr').prop('checked', true);
+            }
+            logd('team_called: ' + team_called);
             var capDiff = settings.get('capDiff');
-            console.log('capDiff: ' + capDiff);
+            logd('capDiff: ' + capDiff);
             var round_up = 0;
-            if (team_called == 1 && capDiff > 0 || team_called == 2 && capDiff < 0) {  // only rounding up if the winning team calls the br
+            if (team_called == 1 && capDiff > 0 || team_called == 2 && capDiff < 0 || capDiff === 0 && brcalltime % 60 >= 30) {  // rounding up if the winning team calls the br or scores are even and clock > :30
                 round_up = 1;
             }
-            // if (GM_getValue('ELTP_capDiff') > 0) {
-            //     if (GM_getValue('ELTP_lastbrcall_team') == 1) {
-            //     } else if (GM_getValue('ELTP_lastbrcall_team') == 2) {
-            //     }
-            // }
             var newgameminutes = (round_up === 0)?(Math.floor(brcalltime / 60)):(Math.ceil(brcalltime / 60));
             var winningteam = 0;
             if (capDiff > 0) {
@@ -194,20 +221,26 @@ function setup() {
             } else if (capDiff < 0) {
                 winningteam = 2;
             }
-            console.log('winningteam: ' + winningteam);
+            logd('winningteam: ' + winningteam);
             var message = settings.get(teams[brteam-1]) + ' called BR at ' + pretty_remaining(settings.get('lastbrcall')) + ', ';
-            console.log(message);
-            message += (winningteam > 0)?(GM_getValue('ELTP_team' + teams[winningteam-1]) + ' was winning'):('caps were even');
-            console.log(message);
+            logd(message);
+            message += (winningteam > 0)?(settings.get(teams[winningteam-1]) + ' was winning'):('caps were even');
+            logd(message);
             message += ', so I\'ll round ';
-            console.log(message);
+            logd(message);
             message += (round_up > 0)?('up'):('down');
-            console.log(message);
+            logd(message);
             message += ' to ' + newgameminutes + ' Minutes';
-            console.log(message);
-            tagpro.group.socket.emit("chat", message);
+            logd(message);
+            setTimeout(function() {
+                tagpro.group.socket.emit("chat", message);
+            }, 5000);  // wait 5s to send the message
             settings.set('lastbrcall', 0);  // reset last br call
             settings.set('lastbrcall_team', 0);
+            $('#tpeltp_div').append('<br><label class="btn btn-default" id="tpeltp_brmsg" value="' + message + '">Send BR status message</label>');
+            $('input[name="tpeltp_brmsg"]').click(function() {
+                tagpro.group.socket.emit("chat", $(this).prop('value'));
+            });
             if ((newgameminutes === 0)) {
                 next_half();  // proceed to next half if there's no minutes left
             } else {
@@ -216,9 +249,6 @@ function setup() {
         }
         // default_settings();
         listeners();  // start the listeners
-    } else {
-        deactivate();
-        GM_setValue('ELTP_half', 1);
     }
 }
 
@@ -277,10 +307,10 @@ function set_map() {
 
 // Set the default settings
 function default_settings() {
-    // console.log('default_settings');
+    // logd('default_settings');
     // $('select[name="time"]').val(10);
     // $('select[name="caps"]').val(0);
-    // console.log('week: '+week);
+    // logd('week: '+week);
     set_map();
     tagpro.group.socket.emit("setting", {"name": "time", "value": 10});
     tagpro.group.socket.emit("setting", {"name": "caps", "value": 0});
@@ -302,42 +332,41 @@ function reset_brcalls() {
     settings.set('lastbrcall_team', 0);
     settings.set('brcall_team1', 0);
     settings.set('brcall_team2', 0);
+    settings.set('game_caps', []);
+    settings.set('capDiff', 0);
 }
 
 // next Half
 function next_half() {
-    settings.set('half', settings.get('half')+1);
-    reset_brcalls();
+    var half = parseInt(settings.get('half'));
+    settings.set('half', half+1);
+    if (half > 2) reset_brcalls();
     default_settings();  // sets new map (if half > 2)
 }
 
 function listeners() {
     tagpro.group.socket.on('you', function(data) {
         settings.set('me', data);
-        //console.log('me'+data);
+        //logd('me'+data);
     });
 
     tagpro.group.socket.on('member', function(member) {
         if (member.id == settings.get('me')) {
             if (member.leader) {
                 settings.set('leader', true);
-                // activated = true;
-                // if (!activated) {
-                //    activate();
-                // }
+                if (!settings.get('active')) activate();
             } else {  // if we aren't the leader (anymore), deactivate
                 settings.set('leader', false);
-                if (settings.get('activated')) {
-                    activated = false;
-                    deactivate();
-                }
+                if (settings.get('active')) deactivate();
             }
         }
     });
 
-    // console.log(tagpro.group.socket);
+    // logd(tagpro.group.socket);
     tagpro.group.socket.on('setting',function(data) {
-            settings.set(data.name, data.value);
+        logd('changed setting:');
+        logd(data);
+        settings.set(data.name, data.value);
     });
 
     // save last cap time to determine if the cap was in the 20 seconds after br was called
@@ -349,8 +378,20 @@ function round_places(number, places) {
 }
 
 // print pretty remaining time
-function pretty_remaining(time) {
-    return (time > 0)?(Math.floor(time / 60) + ':' + Math.round((time % 60))):'0:00';
+function pretty_remaining(time, full=false) {  // time in seconds
+    logd('pretty_remaining(' + time + ')');
+    var minutes = (time%60<10)?'0'+Math.floor(time%60):Math.floor(time % 60);
+    if (!full) {
+        time = Math.round(time*10)/10;  // round to first millisecond digit
+        minutes = (time%60<10)?'0'+Math.floor(time%60):Math.floor(time % 60);
+        return (time > 0)?(Math.floor(time / 60) + ':' + minutes + '.' + Math.round((time*1000)%1000)/100):'0:00.0';
+    } else {
+        return (time > 0)?(Math.floor(time / 60) + ':' + minutes):'0:00';  // without milliseconds
+    }
+    logd('minutes: ' + minutes);
+}
+
+function return_to_group() {
 }
 
 // when br is called
@@ -358,50 +399,53 @@ function chat_br(chat) {
     var breakcallat = 0;
     var team = 0;
     var message = '';
-    console.log('br chat.from: ' + chat.from);
+    logd('br chat.from: ' + chat.from);
     for (var playerId in tagpro.players) {
-         console.log('playerId: ' + playerId + ', playerTeam: ' + tagpro.players[playerId].team);
+         logd('playerId: ' + playerId + ', playerTeam: ' + tagpro.players[playerId].team);
         if (playerId == chat.from) {
             team = tagpro.players[playerId].team;
         }
     }
-    console.log('team: ' + team);
-    console.log('brcall_team'+team+': ' + settings.get('brcall_team' + team));
+    logd('team: ' + team);
+    logd('brcall_team'+team+': ' + settings.get('brcall_team' + team));
     if (settings.get('brcall_team' + team) > 0) {  // team already used br in this half
-        message = 'Sorry, but you used your BR for this half already. Keep playing!';
+        message = 'Sorry, but you used your BR for this game already. Keep playing!';
         tagpro.group.socket.emit("chat", message);
     } else {
         settings.set('brcall_team' + team, 1);  // save team that called br
         var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
-        console.log('fullTime: ' + fullTime);
-        var time = Date.now(); // time of br call
-        console.log('time: ' + time);
+        logd('fullTime: ' + fullTime);
+        var time = Date.now();  // time of br call
+        logd('time: ' + time);
         breakcallat = (fullTime-time)/1000;
-        console.log('breakcallat: ' + breakcallat);
-        console.log('ELTP_lastbrcall: ' + settings.get('lastbrcall'));
+        logd('breakcallat: ' + breakcallat);
+        logd('lastbrcall: ' + settings.get('lastbrcall'));
         var lastbrcall = settings.get('lastbrcall');
         var saved_breakcallat = (fullTime-lastbrcall)/1000;
         var text_breakcallat = pretty_remaining(breakcallat);
-        var text_breakcallatm20 = pretty_remaining(breakcallat-20);
-        console.log('breakcallat-20: ' + round_places(breakcallat-20, 3));
-        console.log('saved_breakcallat: ' + round_places(saved_breakcallat, 3));
+        var text_breakcallatm20 = pretty_remaining(breakcallat-20, true);
+        logd('breakcallat-20: ' + round_places(breakcallat-20, 3));
+        logd('saved_breakcallat: ' + round_places(saved_breakcallat, 3));
         if ((lastbrcall > 0) && ((breakcallat-20) < ((fullTime-settings.get('lastbrcall'))/1000))) {
-            message = 'BR was already called, STOP at ' + pretty_remaining(saved_breakcallat-20) + ' or next cap';
+            message = 'BR was already called, STOP at ' + pretty_remaining(saved_breakcallat-20, true) + ' or next cap';
         } else {
             settings.set('lastbrcall', breakcallat);
             settings.set('lastbrcall_team', team);
             message = 'BR was called, STOP at ' + text_breakcallatm20 + ' or next cap';
         }
         tagpro.group.socket.emit("chat", message);  // send br message to group chat
+        setTimeout(function() {
+            tagpro.group.socket.emit("chat", 'STOP');
+            return_to_group();
+        }, 20000);
     }
-    return breakcallat;
 }
 
 
 if(IAmIn === 'group') { // group page
     var init = false;
     var activated = true;
-
+    logd('group lastbrcall: ' + settings.get('lastbrcall'));
     tagpro.group.socket.on('private',function(priv) {
         if(priv.isPrivate && !init) {
             setup();
@@ -410,70 +454,67 @@ if(IAmIn === 'group') { // group page
     });
 } else if (IAmIn === 'game') {
     tagpro.ready(function() {
-        // console.log('test');
-        tagpro.socket.on('chat', function(chat){
+        // logd('test');
+        tagpro.socket.on('chat', function(chat) {
             if (chat.message.trim().toLowerCase() === "br") {  // br was called
                 chat_br(chat);
-                // TODO: after 20+ secs, return to group page
-                /*function waitForInitialized(fn) {
-                    if (!tagpro) {
-                        setTimeout(function() {
-                            waitForInitialized(fn);
-                        }, 10);
-                    } else {
-                        fn();
-                    }
-                }*/
             }
         });
 
         tagpro.socket.on('sound', function(data) {  // there was a cap
             if (data.s === 'cheering' || data.s === 'sigh') {
-                console.log('cap');
+                logd('cap');
                 var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
-                var time = Date.now();
-                var breakcall = settings.get('lastbrcall');
-
+                var captime = fullTime-Date.now();
+                var breakcall = parseInt(settings.get('lastbrcall'));
                 // GM_setValue('ELTP_lastCap', Date.now());
-                var caps = settings.get('caps');
-                caps.push(time);
-                settings.set('caps', caps);
-
-                if ((breakcall > 0) && ((breakcall+20) < time)) { // break was called and we're in the 20 sec window
-                    settings.set('capDiff', (tagpro.score.r-tagpro.score.b));
-                    tagpro.group.socket.emit("chat", "Cap at " + pretty_remaining((fullTime-time)/1000) + ' counts');
-                    tagpro.group.socket.emit("chat", "STOP now");
+                var game_caps = settings.get('game_caps');
+                game_caps.push(time);
+                settings.set('game_caps', game_caps);
+                logd(game_caps);
+                logd('capDiff: ' + (tagpro.score.r-tagpro.score.b));
+                settings.set('capDiff', (tagpro.score.r-tagpro.score.b));
+                logd('breakcall: ' + breakcall);
+                logd('breakcall-20: ' + (breakcall-20));
+                logd('time: ' + captime);
+                logd('(breakcall-20) < time: ' + ((breakcall-20) < captime/1000));
+                if ((breakcall > 0)) { // break was called and we're in the 20 sec window
+                    if ((breakcall-20) < captime/1000) {
+                        tagpro.group.socket.emit("chat", "Cap at " + pretty_remaining(captime/1000) + ' counts');
+                        tagpro.group.socket.emit("chat", "STOP");
+                    } else {
+                        tagpro.group.socket.emit("chat", "Cap at " + pretty_remaining(captime/1000) + ' doesn\'t count');
+                    }
                     return_to_group();
                 }
+                logd('onsound lastbrcall: ' + settings.get('lastbrcall'));
             }
         });
 
-        /*
         tagpro.socket.on('score', function(data) {
-            GM_setValue('ELTP_lastCap', Date.now());
+            logd('score data: ');
+            logd(data);
             var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
-            var time = Date.now();
-            var breakcall = GM_getValue('ELTP_lastbrcall');
-            if (breakcall+20 < time) {
-                GM_setValue('ELTP_capDiff', (tagpro.score.r-tagpro.score.b));
-            }
+            var time = fullTime-Date.now();
+            var breakcall = parseInt(settings.get('lastbrcall'));
+            if (breakcall === 0) settings.set('capDiff', parseInt(data.r-data.b));
         });
-        */
 
         // upon end of a game
         tagpro.socket.on('end', function(data) {
             var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
             var time = Date.now();
             var half = settings.get('half');
-            console.log('half: ' + half);
+            logd('half: ' + half);
             if (fullTime == time) {
                 if (half+1 == 5) {
-                    tagpro.group.socket.emit("chat", "Thanks for playing. Good game!");
+                    tagpro.group.socket.emit("chat", "Thanks for playing. Good games!");
                     deactivate();  // deactivate when half 4 was played
                 } else {
                     next_half();
                 }
             }
         });
+        logd('game_ lastbrcall: ' + settings.get('lastbrcall'));
     });
 }
