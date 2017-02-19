@@ -1,7 +1,6 @@
-
 // ==UserScript==
-// @name         TagPro ELTP group settings dev
-// @version      0.2
+// @name         TagPro ELTP group
+// @version      0.5
 // @description  Sets default ELTP group settings, maps and also remaining time in case of break request
 // @author       zeeres
 // @include      http://tagpro-*.koalabeast.com*
@@ -9,11 +8,15 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_addStyle
+// @updateURL    https://github.com/zeeres/TagPro-ELTPGroup/raw/master/TagPro-ELTPGroup.user.js
+// @downloadURL  https://github.com/zeeres/TagPro-ELTPGroup/raw/master/TagPro-ELTPGroup.user.js
 // ==/UserScript==
 
 var timeNow = Date.now();
-var maps = ["EMERALD", "Pilot", "Market", "Transilio", "Atomic", "IRON", "Rush", "Curb", "Pilot"];
-var eltp_start = 1477094400*1000;  // Week 0: ENLTP
+// var maps = ["EMERALD", "Pilot", "Market", "Transilio", "Atomic", "IRON", "Rush", "Curb", "Pilot"];
+var maps = {0: ["Wombo_Combo", "Plasma"], 1: ["Cloud", "Wamble"], 2: ["Ricochet", "Gumbo"], 3: ["Bulldog", "CommandCenter", "Volt"]};  // format - {week: ["map1", "map2"]}, where week is the amount of weeks after eltp_start
+//var eltp_start = 1477094400*1000;  // Week 0: ENLTP
+var eltp_start = 1486512000*1000;  // Wednesday, Feb 08; Week 0 of ECLTP
 var time = (timeNow-eltp_start)/(7*24*60*60*1000);
 var week = 0;
 function set_week() {
@@ -27,7 +30,7 @@ function logd(message) {
     if (debug) console.log(message);
 }
 
-var default_data = {stored: true, active: true, map: '', time: 10, game_caps: [], capDiff: 0, half: 1, lastbrcall: 0, lastbrcall_team: 0, brcall_team1: false, brcall_team2: false, me: '', leader: false};  // default data
+var default_data = {stored: true, active: true, map: '', time: 10, game_caps: [], offset: [0, 0], score: [0, 0], capDiff: 0, half: 1, lastbrcall: 0, lastbrcall_team: 0, brcall_team1: false, brcall_team2: false, me: '', leader: false};  // default data
 
 class Settings {
     constructor(data) {
@@ -117,6 +120,34 @@ var settings = new Settings(default_data);
 // settings.delete_all();
 // settings = new Settings(default_data);
 
+function team_swap() {
+    var offset = settings.get('offset'),
+        brcallteam1 = settings.get('brcall_team1'),
+        brcallteam2 = settings.get('brcall_team2');
+
+    settings.set('offset', [offset[1], offset[0]]);
+    $('input[name="tpeltp_offset_0"]').prop('value', offset[1]);
+    $('input[name="tpeltp_offset_1"]').prop('value', offset[0]);
+    settings.set('brcall_team1', brcallteam2);
+    $('input[name="tpeltp_redbr"]').prop('checked', brcallteam2);
+    settings.set('brcall_team2', brcallteam1);
+    $('input[name="tpeltp_bluebr"]').prop('checked', brcallteam1);
+}
+
+function add_halves() {
+    $('#tpeltp_halves').append('Half <label class="btn btn-default"><input type="radio" name="tpeltp_half" value="1">1</label>');
+    $('#tpeltp_halves').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="2">2</label>');
+    for (var i = 1; i < maps[week].length; i++) {
+        $('#tpeltp_halves').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="' + (i*2 + 1) + '">' + (i*2 + 1) + '</label>');
+        $('#tpeltp_halves').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="' + (i*2 + 2) + '">' + (i*2 + 2) + '</label>');
+        $('#tpeltp_div input[name="tpeltp_half"][value="' + settings.get('half') + '"]').prop("checked", true);
+        $('input[name="tpeltp_half"]').change(function() {  // when one of the "half" buttons is pushed
+            settings.set('half', $(this).prop('value'));
+            set_map();
+        });
+    }
+}
+
 function setup() {
     logd('setup');
     // Sets up the button and calls activate and deactivate functions if checkbox is changed
@@ -145,28 +176,59 @@ function setup() {
     });
 
     // week buttons
+    $('#tpeltp_div').append('Week ');
     logd(week);
-    $('#tpeltp_div').append('Week <label class="btn btn-default"><input type="radio" name="tpeltp_week" value="0">0</label>');
-    for (var i = 1; i < maps.length-1; i++) {  // -1 bc we are starting from 1 and another -1 bc last map doesn't count as a new week
-        $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_week" value="'+i+'">'+i+'</label>');
+    maps_keys = Object.keys(maps).sort();
+    for (var w in maps_keys) {
+        $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_week" value="'+w+'">'+w+'</label>');
     }
-    if (week < maps.length-1) $('#tpeltp_div input[name="tpeltp_week"][value="' + week + '"]').prop("checked", true);
+    if (week <= Math.max(...Object.keys(maps))) $('#tpeltp_div input[name="tpeltp_week"][value="' + week + '"]').prop("checked", true);
     $('input[name="tpeltp_week"]').change(function() {  // when one of the "week" buttons is pushed
         week = $(this).prop('value');
         set_map();
+        $('#tpeltp_halves').html('');
+        add_halves();
     });
 
     $('#tpeltp_div').append('<br>');
 
     // half buttons
-    $('#tpeltp_div').append('Half <label class="btn btn-default"><input type="radio" name="tpeltp_half" value="1">1</label>');
-    $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="2">2</label>');
-    $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="3">3</label>');
-    $('#tpeltp_div').append('<label class="btn btn-default"><input type="radio" name="tpeltp_half" value="4">4</label>');
-    $('#tpeltp_div input[name="tpeltp_half"][value="' + settings.get('half') + '"]').prop("checked", true);
-    $('input[name="tpeltp_half"]').change(function() {  // when one of the "half" buttons is pushed
-        settings.set('half', $(this).prop('value'));
-        set_map();
+    $('#tpeltp_div').append('<div id="tpeltp_halves"></div>');
+    add_halves();
+    var offset = settings.get('offset'),
+        score = settings.get('score');
+    logd('score:');
+    logd(score);
+    if (score !== undefined) offset[0] += score[0]; offset[1] += score[1];
+    score = [0, 0];
+    settings.set('score', score);
+    settings.set('offset', offset);
+    logd('offset:');
+    logd(offset);
+    $('#tpeltp_div').append('<div id="tpeltp_offset_div" style="width: 100%">Offsets </div><table id="tpeltp_offset"><tr><td><input type="text" name="tpeltp_offset_0" class="form-control" style="width:40px" value="' + offset[0] + '"></td><td><input type="text" name="tpeltp_offset_1" class="form-control" style="width:40px" value="' + offset[1] + '"></td></tr></table>');
+    function change_offset(elem, dvalue) {
+        var offset = settings.get('offset'),
+            value = parseInt(elem.prop('value')),
+            newvalue = value+dvalue,
+            match = elem.prop('name').match(/tpeltp_offset_([0-9]+)/),
+            lr = match[1];
+        if (newvalue >= 0) {
+            elem.prop('value', newvalue);
+            offset[parseInt(lr)] = newvalue;
+            settings.set('offset', offset);
+        }
+    }
+
+    $('#tpeltp_offset input').keydown(function (e) {
+        var keyCode = e.keyCode || e.which,
+            arrow = {left: 37, up: 38, right: 39, down: 40 };
+        if (keyCode == arrow.up) change_offset($(this), +1);
+        else if (keyCode == arrow.down) change_offset($(this), -1);
+    });
+    $('#tpeltp_offset input').bind('mousewheel DOMMouseScroll', function (event) {
+        event.preventDefault();  // disables scrolling temporarily
+        if (event.originalEvent.wheelDelta > 0 || event.originalEvent.detail < 0) change_offset($(this), +1);
+        else change_offset($(this), -1);
     });
 
     $('#tpeltp_div').append('<br><div id="tpeltp_red" align="center" class="col-md-6 private-game"></div><div id="tpeltp_blue" align="center" class="col-md-6 private-game"></div>');
@@ -182,6 +244,10 @@ function setup() {
         settings.set('brcall_team2', $(this).prop('checked'));
     });
 
+    $('#swapTeams-btn').click(function() {
+        team_swap();
+    });
+
     if (settings.get('active')) {  // if script was activated and page was either refreshed or we returned from game
         logd('setup is_activated');
         // activate();
@@ -192,15 +258,6 @@ function setup() {
             $('#end-game-btn').click();
             logd('brcalled');
             var teams = ['redTeamName', 'blueTeamName'];
-            var brteam = 0;
-            if (settings.get('brcall_team1') > 0) {
-                brteam = 1;
-            } else if (settings.get('brcall_team2') > 0) {
-                brteam = 2;
-            } else {
-                logd('wtf happened here :<');
-            }
-
             var team_called = settings.get('lastbrcall_team');
             if (team_called === 1) {
                 $('#tpeltp_redbr').prop('checked', true);
@@ -222,7 +279,7 @@ function setup() {
                 winningteam = 2;
             }
             logd('winningteam: ' + winningteam);
-            var message = settings.get(teams[brteam-1]) + ' called BR at ' + pretty_remaining(settings.get('lastbrcall')) + ', ';
+            var message = settings.get(teams[team_called-1]) + ' called BR at ' + pretty_remaining(settings.get('lastbrcall')) + ', ';
             logd(message);
             message += (winningteam > 0)?(settings.get(teams[winningteam-1]) + ' was winning'):('caps were even');
             logd(message);
@@ -237,8 +294,8 @@ function setup() {
             }, 5000);  // wait 5s to send the message
             settings.set('lastbrcall', 0);  // reset last br call
             settings.set('lastbrcall_team', 0);
-            $('#tpeltp_div').append('<br><label class="btn btn-default" id="tpeltp_brmsg" value="' + message + '">Send BR status message</label>');
-            $('input[name="tpeltp_brmsg"]').click(function() {
+            $('#tpeltp_div').append('<br><button class="btn btn-primary" style="font-size: 16px;" id="tpeltp_brmsg" value="' + message + '">Send BR message (again)</button>');
+            $('#tpeltp_brmsg').click(function() {
                 tagpro.group.socket.emit("chat", $(this).prop('value'));
             });
             if ((newgameminutes === 0)) {
@@ -283,9 +340,9 @@ function save_settings() {
 function deactivate() {
     settings.set('half', 1);
     reset_brcalls();
-    console.log('TagPro ELTP Group settings deactivated');
     $("#tpeltp_div").hide();
     $("#tpeltp_header").css('background', '#919c28');
+    settings.set('active', false);
 }
 
 // Restore the settings from before the button was activated
@@ -302,7 +359,14 @@ function restore_prev_settings() {
 
 // Sets the map for the current week/half
 function set_map() {
-    tagpro.group.socket.emit("setting", {"name": "map", "value": maps[(settings.get('half') > 2)?(parseInt(week)+1):week]});  // if in second game, use the next map
+    var half = settings.get('half');
+    logd('set_map maps[' + week + ']:');
+    logd(maps[week]);
+    logd('(' + half + ' % 2 === 1)?' + (half-1)/2 + ':' + (half-2)/2);
+    // var map = maps[(settings.get('half') > 2)?(parseInt(week)+1):week];
+    var map = maps[week][(half % 2 === 1)?(half-1)/2:(half-2)/2];
+    logd('maps[' + week + '][' + ((half % 2 === 1)?(half-1)/2:(half-2)/2) + '] = ' + map);
+    tagpro.group.socket.emit("setting", {"name": "map", "value": map});  // if in second game, use the next map
 }
 
 // Set the default settings
@@ -323,6 +387,7 @@ function activate() {
     default_settings();
     $("#tpeltp_div").show();
     $("#tpeltp_header").css('background', '#cddc39');
+    settings.set('active', true);
 }
 
 // reset br calls variables
@@ -330,8 +395,8 @@ function reset_brcalls() {
     // reset br calls for both teams
     settings.set('lastbrcall', 0);
     settings.set('lastbrcall_team', 0);
-    settings.set('brcall_team1', 0);
-    settings.set('brcall_team2', 0);
+    settings.set('brcall_team1', false);
+    settings.set('brcall_team2', false);
     settings.set('game_caps', []);
     settings.set('capDiff', 0);
 }
@@ -340,7 +405,7 @@ function reset_brcalls() {
 function next_half() {
     var half = parseInt(settings.get('half'));
     settings.set('half', half+1);
-    if (half > 2) reset_brcalls();
+    if (half >= 2 && half % 2 === 0) reset_brcalls();
     default_settings();  // sets new map (if half > 2)
 }
 
@@ -356,6 +421,7 @@ function listeners() {
                 settings.set('leader', true);
                 if (!settings.get('active')) activate();
             } else {  // if we aren't the leader (anymore), deactivate
+                logd('not leader, deactivate');
                 settings.set('leader', false);
                 if (settings.get('active')) deactivate();
             }
@@ -378,12 +444,12 @@ function round_places(number, places) {
 }
 
 // print pretty remaining time
-function pretty_remaining(time, full=false) {  // time in seconds
+function pretty_remaining(time, full=false) {  // time in seconds // full = full minutes (round)
     logd('pretty_remaining(' + time + ')');
     var minutes = (time%60<10)?'0'+Math.floor(time%60):Math.floor(time % 60);
     if (!full) {
         time = Math.round(time*10)/10;  // round to first millisecond digit
-        minutes = (time%60<10)?'0'+Math.floor(time%60):Math.floor(time % 60);
+        minutes = (time%60<10)?'0'+Math.floor(time%60):Math.round(time % 60);
         return (time > 0)?(Math.floor(time / 60) + ':' + minutes + '.' + Math.round((time*1000)%1000)/100):'0:00.0';
     } else {
         return (time > 0)?(Math.floor(time / 60) + ':' + minutes):'0:00';  // without milliseconds
@@ -392,6 +458,8 @@ function pretty_remaining(time, full=false) {  // time in seconds
 }
 
 function return_to_group() {
+    var group_path = settings.get('group-path');
+    if (group_path !== undefined) window.location.href = window.location.protocol + '//' + window.location.hostname + group_path;
 }
 
 // when br is called
@@ -428,16 +496,18 @@ function chat_br(chat) {
         logd('saved_breakcallat: ' + round_places(saved_breakcallat, 3));
         if ((lastbrcall > 0) && ((breakcallat-20) < ((fullTime-settings.get('lastbrcall'))/1000))) {
             message = 'BR was already called, STOP at ' + pretty_remaining(saved_breakcallat-20, true) + ' or next cap';
+        } else if (breakcallat < 60) {
+            message = 'BR is invalid, we are in the last minute of this half';
         } else {
             settings.set('lastbrcall', breakcallat);
             settings.set('lastbrcall_team', team);
             message = 'BR was called, STOP at ' + text_breakcallatm20 + ' or next cap';
+            setTimeout(function() {
+                tagpro.group.socket.emit("chat", 'STOP');
+                return_to_group();
+            }, 20000);
         }
         tagpro.group.socket.emit("chat", message);  // send br message to group chat
-        setTimeout(function() {
-            tagpro.group.socket.emit("chat", 'STOP');
-            return_to_group();
-        }, 20000);
     }
 }
 
@@ -449,11 +519,17 @@ if(IAmIn === 'group') { // group page
     tagpro.group.socket.on('private',function(priv) {
         if(priv.isPrivate && !init) {
             setup();
+            settings.set('group-path', window.location.pathname);
+            if (settings.get('switch_teams')) $('#swapTeams-btn').click();
             init = true;
         }
     });
 } else if (IAmIn === 'game') {
     tagpro.ready(function() {
+        var active = settings.get('active');
+        logd('active: ');
+        logd(active);
+        if (!active) return;
         // logd('test');
         tagpro.socket.on('chat', function(chat) {
             if (chat.message.trim().toLowerCase() === "br") {  // br was called
@@ -469,15 +545,9 @@ if(IAmIn === 'group') { // group page
                 var breakcall = parseInt(settings.get('lastbrcall'));
                 // GM_setValue('ELTP_lastCap', Date.now());
                 var game_caps = settings.get('game_caps');
+                var offset = settings.get('offset');
                 game_caps.push(time);
                 settings.set('game_caps', game_caps);
-                logd(game_caps);
-                logd('capDiff: ' + (tagpro.score.r-tagpro.score.b));
-                settings.set('capDiff', (tagpro.score.r-tagpro.score.b));
-                logd('breakcall: ' + breakcall);
-                logd('breakcall-20: ' + (breakcall-20));
-                logd('time: ' + captime);
-                logd('(breakcall-20) < time: ' + ((breakcall-20) < captime/1000));
                 if ((breakcall > 0)) { // break was called and we're in the 20 sec window
                     if ((breakcall-20) < captime/1000) {
                         tagpro.group.socket.emit("chat", "Cap at " + pretty_remaining(captime/1000) + ' counts');
@@ -492,12 +562,17 @@ if(IAmIn === 'group') { // group page
         });
 
         tagpro.socket.on('score', function(data) {
-            logd('score data: ');
-            logd(data);
-            var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
-            var time = fullTime-Date.now();
-            var breakcall = parseInt(settings.get('lastbrcall'));
-            if (breakcall === 0) settings.set('capDiff', parseInt(data.r-data.b));
+            var score = settings.get('score'),
+                offset = settings.get('offset'),
+                fullTime = Date.parse(tagpro.gameEndsAt), // expected end of game
+                captime = fullTime-Date.now(),
+                breakcall = parseInt(settings.get('lastbrcall'));
+            if (breakcall > 0 && (breakcall-20) < captime/1000) { // break was called and we're in the 20 sec window or no break was called
+                settings.set('score', [data.r, data.b]);
+            } else if (breakcall === 0) {
+                settings.set('score', [data.r, data.b]);
+                settings.set('capDiff', (offset[0]+data.r-(offset[1]+data.b)));
+            }
         });
 
         // upon end of a game
@@ -505,16 +580,22 @@ if(IAmIn === 'group') { // group page
             var fullTime = Date.parse(tagpro.gameEndsAt); // expected end of game
             var time = Date.now();
             var half = settings.get('half');
+            var offset = settings.get('offset');
             logd('half: ' + half);
-            if (fullTime == time) {
-                if (half+1 == 5) {
-                    tagpro.group.socket.emit("chat", "Thanks for playing. Good games!");
-                    deactivate();  // deactivate when half 4 was played
-                } else {
-                    next_half();
-                }
+            logd('fullTime: ' + fullTime);
+            logd('time: ' + time);
+            if (Math.floor(fullTime/1000) == Math.floor(time/1000)) {
+                // if (half+1 == 5) {
+                //     tagpro.group.socket.emit("chat", "Thanks for playing. Good games!");
+                //     deactivate();  // deactivate when half 4 was played
+                // } else {
+                //     next_half();
+                // }
+                if (half % 2 === 1) settings.set('switch_teams', true);
+                next_half();
             }
+            //offset = [parseInt(offset[0]+parseInt(tagpro.score.r)), parseInt(offset[1] + parseInt(tagpro.score.b))];
+            //settings.set('offset', offset);
         });
-        logd('game_ lastbrcall: ' + settings.get('lastbrcall'));
     });
 }
