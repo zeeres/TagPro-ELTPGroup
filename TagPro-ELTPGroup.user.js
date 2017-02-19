@@ -24,7 +24,7 @@ function set_week() {
 }
 set_week();
 
-var debug = true;
+var debug = false;
 
 function logd(message) {
     if (debug) console.log(message);
